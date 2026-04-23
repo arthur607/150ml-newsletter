@@ -20,13 +20,13 @@ Twitter and YouTube are supported in a second phase via Claude computer use agen
 | Browser automation | Claude computer use (phase 2) |
 | Database | PostgreSQL |
 | Infrastructure | Railway (all services + DB) |
-| Frontend | Nuxt 3 |
+| Frontend | templ + htmx (served by API Service) |
 
 ---
 
 ## Architecture
 
-Four services share a single PostgreSQL instance on Railway.
+Three services + one cron pair share a single PostgreSQL instance on Railway. The frontend is served directly by the API Service — no separate frontend deployment.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -46,14 +46,98 @@ Four services share a single PostgreSQL instance on Railway.
 │  └──────────────┘                 ▼                  │
 │                       ┌──────────────────────────┐   │
 │                       │    API Service (Go)      │   │
-│                       │  brief gen + REST API    │   │
+│                       │  brief gen + HTTP server │   │
+│                       │  templ + htmx UI         │   │
 │                       └────────────┬─────────────┘   │
 └────────────────────────────────────┼────────────────┘
                                      │
-                              ┌──────▼──────┐
-                              │   Frontend  │
-                              │   (Nuxt 3)  │
-                              └─────────────┘
+                               browser (user)
+```
+
+---
+
+## Pipeline Flow
+
+```mermaid
+flowchart TD
+    subgraph Sources["Fontes (Phase 1)"]
+        RSS[RSS / Atom\nFeeds]
+        SUB[Substack\nFeeds]
+        RED[Reddit\nAPI]
+        HN[Hacker News\nAPI]
+    end
+
+    subgraph Phase2["Fontes (Phase 2)"]
+        TW[Twitter/X\nClaude computer use]
+        YT[YouTube\nClaude computer use]
+    end
+
+    subgraph Ingestion["Ingestion Service · Go · cron 0 */6"]
+        ING[Scrape sources\nparse metadata]
+        DEDUP{URL ou\nexternal_id\njá existe?}
+        SKIP[Ignorar\nsilenciosamente]
+        SAVE[Salvar em\ningested_items\nstatus=pending]
+    end
+
+    subgraph Processing["Processing Service · Go · cron 30 */6"]
+        FETCH[Fetch corpo\ncompleto do artigo]
+        SUMMARY[TogetherAI LLM\nGerar resumo ~150 words]
+        EMBTEXT[TogetherAI LLM\nGerar embedding_text]
+        PROC[Salvar em\nprocessed_items]
+        ERR{Falhou\n3x?}
+        ERRST[status=error\n+ error_message]
+    end
+
+    subgraph ML["ML Service · Python · cron 0 1,7,13,19"]
+        EMBED[TogetherAI Embeddings\nvectorizar embedding_text]
+        UMAP[UMAP\nredução dimensional]
+        HDBSCAN[HDBSCAN\nclustering por tema]
+        LABEL[TogetherAI LLM\ngerar label do cluster]
+        CLSAVE[Salvar clusters\natualizar cluster_id]
+    end
+
+    subgraph API["API Service · Go · sempre online"]
+        BGEN[Cron 30 1,7,13,19\nGerar briefing]
+        CLUSTER_ANALYSIS[TogetherAI LLM\nanálise por cluster]
+        FINAL[TogetherAI LLM\nsíntese final → Markdown]
+        BSAVE[Upsert em\nbriefings]
+        WEB[Servir UI\ntempl + htmx]
+    end
+
+    subgraph DB["PostgreSQL · Railway"]
+        T1[(data_sources)]
+        T2[(ingested_items)]
+        T3[(processed_items)]
+        T4[(clusters)]
+        T5[(briefings)]
+    end
+
+    RSS & SUB & RED & HN --> ING
+    TW & YT --> ING
+    ING --> DEDUP
+    DEDUP -->|sim| SKIP
+    DEDUP -->|não| SAVE
+    SAVE --> T2
+    T1 --> ING
+
+    T2 -->|status=pending| FETCH
+    FETCH --> SUMMARY --> EMBTEXT --> PROC
+    PROC --> T3
+    PROC --> ERR
+    ERR -->|sim| ERRST --> T2
+    PROC -->|ok| T2
+
+    T3 -->|cluster_id IS NULL| EMBED
+    EMBED --> UMAP --> HDBSCAN --> LABEL --> CLSAVE
+    CLSAVE --> T4
+    CLSAVE --> T3
+
+    T4 --> BGEN
+    BGEN --> CLUSTER_ANALYSIS --> FINAL --> BSAVE
+    BSAVE --> T5
+
+    T5 --> WEB
+    WEB --> Browser([Usuário\nno browser])
 ```
 
 ---
@@ -120,20 +204,25 @@ Clusters the day's processed items by topic using embeddings.
 
 ### API Service (Go — always online)
 
-Orchestrates briefing generation and serves the REST API consumed by the frontend.
+Orchestrates briefing generation and serves the web UI via templ + htmx. No separate frontend service — HTML is rendered server-side and returned directly to the browser. htmx handles dynamic updates (partial page swaps) without any JavaScript framework.
 
 **Briefing generation (triggered after ML service):**
 1. For each cluster: TogetherAI LLM call → cluster analysis paragraph
 2. Final TogetherAI LLM call → synthesize all cluster analyses into one briefing (Markdown)
 3. Upsert into `briefings` (idempotent by date)
 
-**REST endpoints:**
-- `GET /briefings` — list briefings (date, status)
-- `GET /briefings/:date` — full briefing content
-- `GET /sources` — list configured data sources
-- `POST /sources` — add a new source
-- `PATCH /sources/:id` — enable/disable a source
-- `GET /items` — list ingested items with filters (source, date, status, cluster)
+**Web routes (HTML via templ):**
+- `GET /` — redirect to latest briefing
+- `GET /briefings/:date` — render full briefing page
+- `GET /sources` — source manager page
+- `GET /items` — ingested items list with status indicators
+
+**HTMX endpoints (HTML fragments):**
+- `POST /sources` — add source, returns updated source list fragment
+- `PATCH /sources/:id/toggle` — enable/disable, returns updated row fragment
+- `GET /items?source=&status=` — filtered items fragment
+
+No JSON API in Phase 1 — templ renders everything server-side.
 
 ---
 
@@ -263,7 +352,7 @@ The Ingestion Service uses `INSERT ... ON CONFLICT DO NOTHING` and logs skipped 
 | Ingestion | Unit tests on parsers (RSS, Reddit, HN) with response fixtures; integration test for upsert/dedup against real Postgres |
 | Processing | Unit tests on HTML-to-text extraction; TogetherAI API mocked in tests |
 | ML Service | Sanity test on clustering pipeline with a fixed dataset |
-| API Service | Integration tests on REST routes against real Postgres (no DB mocking) |
+| API Service | Integration tests on HTTP handlers against real Postgres (no DB mocking); templ rendering tested via `httptest` |
 
 Local development uses Docker Compose with an ephemeral Postgres instance. `make test` runs the full suite.
 
@@ -274,7 +363,7 @@ Local development uses Docker Compose with an ephemeral Postgres instance. `make
 ### Phase 1 — MVP
 - Ingestion: RSS, Substack, Reddit, Hacker News
 - Processing + ML clustering
-- Web interface (briefing reader + source manager)
+- Web interface via templ + htmx (briefing reader + source manager)
 - Deployed on Railway
 
 ### Phase 2
@@ -290,12 +379,11 @@ Local development uses Docker Compose with an ephemeral Postgres instance. `make
 ├── services/
 │   ├── ingestion/        # Go — cron scraper
 │   ├── processing/       # Go — content fetch + summarize
-│   ├── api/              # Go — REST API + brief generation
+│   ├── api/              # Go — HTTP server + brief gen + templ templates
+│   │   └── templates/    # templ .templ files (compilados para Go)
 │   ├── ml/               # Python — embeddings + clustering
 │   └── computer-use/     # Python — Claude browser agent (phase 2)
-├── apps/
-│   └── frontend/         # Nuxt 3
 ├── packages/
-│   └── database/         # Migrations (sqlc or goose)
+│   └── database/         # Migrations (goose)
 └── docker-compose.yml    # Local development
 ```
