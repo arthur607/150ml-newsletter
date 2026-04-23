@@ -1,1 +1,0 @@
-ALTER TABLE "ingested_items" ADD COLUMN "embedding_text" text;
