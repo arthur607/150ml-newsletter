@@ -38,7 +38,7 @@
 ├── services/processing/
 │   ├── go.mod                                 # module processing
 │   ├── main.go                                # entrypoint: fetch pending items, process, exit
-│   ├── config/config.go                       # DB_URL, TOGETHER_API_KEY
+│   ├── config/config.go                       # DB_URL, TOGETHER_AI_API_KEY
 │   ├── db/db.go                               # pgx pool constructor
 │   ├── db/queries.go                          # ListPendingItems, MarkProcessing, MarkDone, MarkError, InsertProcessedItem
 │   ├── fetch/fetch.go                         # HTTP fetch + goquery HTML-to-text
@@ -48,7 +48,7 @@
 ├── services/ml/
 │   ├── pyproject.toml                         # uv project: psycopg, umap-learn, hdbscan, requests, python-dotenv
 │   ├── main.py                                # entrypoint: run pipeline, exit
-│   ├── config.py                              # DB_URL, TOGETHER_API_KEY from env
+│   ├── config.py                              # DB_URL, TOGETHER_AI_API_KEY from env
 │   ├── db.py                                  # psycopg connection + queries
 │   ├── embeddings.py                          # TogetherAI embeddings API
 │   ├── clustering.py                          # UMAP + HDBSCAN
@@ -58,7 +58,7 @@
 └── services/api/
     ├── go.mod                                 # module api
     ├── main.go                                # entrypoint: HTTP server + brief-gen cron
-    ├── config/config.go                       # PORT, DB_URL, TOGETHER_API_KEY
+    ├── config/config.go                       # PORT, DB_URL, TOGETHER_AI_API_KEY
     ├── db/db.go                               # pgx pool constructor
     ├── db/queries.go                          # GetLatestBriefing, GetBriefingByDate, ListSources, AddSource, ToggleSource, ListItems, UpsertBriefing, ListClustersForDate
     ├── briefing/generator.go                  # TogetherAI: cluster analysis + final synthesis
@@ -113,7 +113,7 @@ services:
 ```bash
 # .env.example
 DATABASE_URL=postgres://curator:curator@localhost:5432/curator?sslmode=disable
-TOGETHER_API_KEY=your_key_here
+TOGETHER_AI_API_KEY=your_key_here
 PORT=8080
 ```
 
@@ -1518,9 +1518,9 @@ type Config struct {
 
 func Load() Config {
 	dbURL := os.Getenv("DATABASE_URL")
-	apiKey := os.Getenv("TOGETHER_API_KEY")
+	apiKey := os.Getenv("TOGETHER_AI_API_KEY")
 	if dbURL == "" || apiKey == "" {
-		slog.Error("DATABASE_URL and TOGETHER_API_KEY are required")
+		slog.Error("DATABASE_URL and TOGETHER_AI_API_KEY are required")
 		os.Exit(1)
 	}
 	return Config{DatabaseURL: dbURL, TogetherAPIKey: apiKey}
@@ -1898,7 +1898,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.environ["DATABASE_URL"]
-TOGETHER_API_KEY = os.environ["TOGETHER_API_KEY"]
+TOGETHER_AI_API_KEY = os.environ["TOGETHER_AI_API_KEY"]
 ```
 
 - [ ] **Step 4: Write db.py**
@@ -1964,7 +1964,7 @@ git commit -m "feat(ml): add Python project setup and DB layer"
 ```python
 # services/ml/embeddings.py
 import requests
-from config import TOGETHER_API_KEY
+from config import TOGETHER_AI_API_KEY
 
 EMBEDDING_MODEL = "togethercomputer/m2-bert-80M-8k-retrieval"
 
@@ -1973,7 +1973,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     """Call TogetherAI Embeddings API and return vectors."""
     resp = requests.post(
         "https://api.together.xyz/v1/embeddings",
-        headers={"Authorization": f"Bearer {TOGETHER_API_KEY}"},
+        headers={"Authorization": f"Bearer {TOGETHER_AI_API_KEY}"},
         json={"model": EMBEDDING_MODEL, "input": texts},
         timeout=60,
     )
@@ -2082,7 +2082,7 @@ git commit -m "feat(ml): add TogetherAI embeddings and UMAP+HDBSCAN clustering"
 ```python
 # services/ml/labeler.py
 import requests
-from config import TOGETHER_API_KEY
+from config import TOGETHER_AI_API_KEY
 
 LLM_MODEL = "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo"
 
@@ -2098,7 +2098,7 @@ def label_cluster(embedding_texts: list[str]) -> str:
     )
     resp = requests.post(
         "https://api.together.xyz/v1/chat/completions",
-        headers={"Authorization": f"Bearer {TOGETHER_API_KEY}"},
+        headers={"Authorization": f"Bearer {TOGETHER_AI_API_KEY}"},
         json={
             "model": LLM_MODEL,
             "messages": [{"role": "user", "content": prompt}],
@@ -2189,7 +2189,7 @@ if __name__ == "__main__":
 
 ```bash
 cd services/ml && DATABASE_URL=postgres://curator:curator@localhost:5432/curator?sslmode=disable \
-  TOGETHER_API_KEY=your_key \
+  TOGETHER_AI_API_KEY=your_key \
   python main.py
 ```
 Expected: log line `no unprocessed items for <date>` (since no items yet) or successful clustering if items exist.
@@ -2238,13 +2238,13 @@ type Config struct {
 
 func Load() Config {
 	dbURL := os.Getenv("DATABASE_URL")
-	apiKey := os.Getenv("TOGETHER_API_KEY")
+	apiKey := os.Getenv("TOGETHER_AI_API_KEY")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	if dbURL == "" || apiKey == "" {
-		slog.Error("DATABASE_URL and TOGETHER_API_KEY are required")
+		slog.Error("DATABASE_URL and TOGETHER_AI_API_KEY are required")
 		os.Exit(1)
 	}
 	return Config{DatabaseURL: dbURL, TogetherAPIKey: apiKey, Port: port}
@@ -3330,7 +3330,7 @@ Expected: no errors.
 
 ```bash
 DATABASE_URL=postgres://curator:curator@localhost:5432/curator?sslmode=disable \
-  TOGETHER_API_KEY=dummy \
+  TOGETHER_AI_API_KEY=dummy \
   PORT=8080 \
   go run ./services/api/main.go
 ```
@@ -3387,11 +3387,11 @@ docker compose exec postgres psql -U curator -c \
 ```
 Expected: rows with `pending` status.
 
-- [ ] **Step 5: Run processing (requires real TOGETHER_API_KEY)**
+- [ ] **Step 5: Run processing (requires real TOGETHER_AI_API_KEY)**
 
 ```bash
 DATABASE_URL=postgres://curator:curator@localhost:5432/curator?sslmode=disable \
-  TOGETHER_API_KEY=your_real_key \
+  TOGETHER_AI_API_KEY=your_real_key \
   go run ./services/processing/main.go
 ```
 Expected: JSON logs with `"item processed"` entries.
@@ -3401,7 +3401,7 @@ Expected: JSON logs with `"item processed"` entries.
 ```bash
 cd services/ml && \
   DATABASE_URL=postgres://curator:curator@localhost:5432/curator?sslmode=disable \
-  TOGETHER_API_KEY=your_real_key \
+  TOGETHER_AI_API_KEY=your_real_key \
   python main.py
 ```
 Expected: logs showing clusters found and saved.
@@ -3418,7 +3418,7 @@ Expected: rows with topic labels.
 
 ```bash
 DATABASE_URL=postgres://curator:curator@localhost:5432/curator?sslmode=disable \
-  TOGETHER_API_KEY=your_real_key \
+  TOGETHER_AI_API_KEY=your_real_key \
   PORT=8080 \
   go run ./services/api/main.go &
 ```
@@ -3451,6 +3451,6 @@ After the smoke test passes:
 - [ ] Deploy `services/processing` as a cron service: `30 */6 * * *`
 - [ ] Deploy `services/ml` as a cron service: `0 1,7,13,19 * * *`
 - [ ] Deploy `services/api` as a web service (always-on)
-- [ ] Set `DATABASE_URL` and `TOGETHER_API_KEY` as Railway shared env vars
+- [ ] Set `DATABASE_URL` and `TOGETHER_AI_API_KEY` as Railway shared env vars
 - [ ] Run `make migrate` against Railway Postgres URL
 - [ ] Seed initial data sources via the `/sources` UI
