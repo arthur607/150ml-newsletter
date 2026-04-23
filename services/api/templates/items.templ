@@ -1,0 +1,44 @@
+package templates
+
+import "api/db"
+
+templ ItemsPage(items []db.Item, sources []db.Source) {
+  @Layout("Items") {
+    <h1>Ingested Items</h1>
+    <form hx-get="/items" hx-target="#items-list" hx-swap="outerHTML" hx-trigger="change">
+      <select name="source">
+        <option value="">All sources</option>
+        for _, s := range sources {
+          <option value={ s.ID }>{ s.Name }</option>
+        }
+      </select>
+      <select name="status">
+        <option value="">All statuses</option>
+        <option value="pending">Pending</option>
+        <option value="processing">Processing</option>
+        <option value="done">Done</option>
+        <option value="error">Error</option>
+      </select>
+    </form>
+    <br/>
+    @ItemsList(items)
+  }
+}
+
+templ ItemsList(items []db.Item) {
+  <table id="items-list">
+    <thead>
+      <tr><th>Title</th><th>Source</th><th>Status</th><th>Ingested</th></tr>
+    </thead>
+    <tbody>
+      for _, item := range items {
+        <tr>
+          <td><a href={ templ.URL(item.URL) } target="_blank">{ item.Title }</a></td>
+          <td>{ item.SourceName }</td>
+          <td><span class={ "badge badge-" + item.Status }>{ item.Status }</span></td>
+          <td>{ item.IngestedAt.Format("Jan 2 15:04") }</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+}

@@ -1,0 +1,22 @@
+package fragments
+
+import "api/db"
+
+templ SourceRow(s db.Source) {
+  <tr id={ "source-" + s.ID }>
+    <td>{ s.Name }</td>
+    <td>{ s.Type }</td>
+    <td><a href={ templ.URL(s.URL) } target="_blank">{ s.URL }</a></td>
+    <td>
+      if s.Active {
+        <button hx-patch={ "/sources/" + s.ID + "/toggle" }
+                hx-target={ "#source-" + s.ID }
+                hx-swap="outerHTML">Disable</button>
+      } else {
+        <button hx-patch={ "/sources/" + s.ID + "/toggle" }
+                hx-target={ "#source-" + s.ID }
+                hx-swap="outerHTML">Enable</button>
+      }
+    </td>
+  </tr>
+}

@@ -1,0 +1,37 @@
+package templates
+
+import (
+  "api/db"
+  "api/templates/fragments"
+)
+
+templ SourcesPage(sources []db.Source) {
+  @Layout("Sources") {
+    <h1>Sources</h1>
+    <form hx-post="/sources" hx-target="#source-list" hx-swap="outerHTML">
+      <select name="type" required>
+        <option value="rss">RSS / Substack</option>
+        <option value="reddit">Reddit</option>
+        <option value="hn">Hacker News</option>
+      </select>
+      <input type="text" name="name" placeholder="Name" required/>
+      <input type="url" name="url" placeholder="URL" required/>
+      <button type="submit">Add Source</button>
+    </form>
+    <br/>
+    @SourceList(sources)
+  }
+}
+
+templ SourceList(sources []db.Source) {
+  <table id="source-list">
+    <thead>
+      <tr><th>Name</th><th>Type</th><th>URL</th><th>Active</th></tr>
+    </thead>
+    <tbody>
+      for _, s := range sources {
+        @fragments.SourceRow(s)
+      }
+    </tbody>
+  </table>
+}

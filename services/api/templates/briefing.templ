@@ -1,0 +1,19 @@
+package templates
+
+import "html/template"
+
+templ BriefingPage(date string, contentHTML template.HTML) {
+  @Layout("Briefing " + date) {
+    <h1>Briefing — { date }</h1>
+    <div class="briefing-content">
+      @templ.Raw(string(contentHTML))
+    </div>
+  }
+}
+
+templ NoBriefingPage() {
+  @Layout("No Briefing Yet") {
+    <h1>No briefing yet</h1>
+    <p>The pipeline hasn't generated a briefing for today. Check back later.</p>
+  }
+}
