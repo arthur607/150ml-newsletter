@@ -198,6 +198,9 @@ apps/briefs
 *.egg-info
 
 
+# Go
+*.exe
+
 # TEMP
 feeds.json
 CONTRIBUTING.md
